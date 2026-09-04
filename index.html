@@ -74,7 +74,7 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, isMobile ? 1.5 : 2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 0.9;
+renderer.toneMappingExposure = 1.0;
 renderer.xr.enabled = true;
 renderer.xr.setReferenceSpaceType('local-floor');
 if (renderer.xr.setFoveation) renderer.xr.setFoveation(1);
@@ -93,9 +93,9 @@ const sun = new THREE.Vector3();
   sun.setFromSphericalCoords(1, THREE.MathUtils.degToRad(90 - 8), THREE.MathUtils.degToRad(250));
   u.sunPosition.value.copy(sun);
 }
-const sunLight = new THREE.DirectionalLight(0xffd6a0, 1.9); sunLight.position.copy(sun).multiplyScalar(10000); scene.add(sunLight);
-scene.add(new THREE.HemisphereLight(0xbdd2ff, 0x5c4c36, 0.85));
-const FOG_COLOR = new THREE.Color(0xe6dccd);
+const sunLight = new THREE.DirectionalLight(0xffd6a0, 2.3); sunLight.position.copy(sun).multiplyScalar(10000); scene.add(sunLight);
+scene.add(new THREE.HemisphereLight(0xbdd2ff, 0x5c4c36, 1.25));
+const FOG_COLOR = new THREE.Color(0xdfe0e3);
 const DARK_BG = new THREE.Color(0x0e1219);
 
 // ---------- terreno (malla desde el MDT LIDAR) ----------
@@ -131,7 +131,7 @@ async function buildTerrain() {
   geo.computeVertexNormals();
   material = new THREE.MeshLambertMaterial({ color: 0x8a8f78 });
   mesh = new THREE.Mesh(geo, material); terrain.add(mesh);
-  skirt = new THREE.Mesh(new THREE.CircleGeometry(30000, 96), new THREE.MeshLambertMaterial({ color: 0x7d7157 }));
+  skirt = new THREE.Mesh(new THREE.CircleGeometry(30000, 96), new THREE.MeshLambertMaterial({ color: 0x8c8878 }));
   skirt.rotation.x = -Math.PI / 2; skirt.position.y = -3; terrain.add(skirt);
   setStatus('Relieve listo. Cargando la ortoimagen del propio LIDAR…', 0.2);
 }
