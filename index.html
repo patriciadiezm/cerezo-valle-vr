@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Valle de Cerezo de Abajo · LIDAR en 3D / VR</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<style>
+  html,body{margin:0;height:100%;background:#0b0d12;color:#f3ede2;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;overflow:hidden}
+  canvas{display:block}
+  #overlay{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    background:radial-gradient(ellipse at center,#1a2030 0%,#0b0d12 70%);transition:opacity 1.2s ease;z-index:10;text-align:center;padding:24px}
+  #overlay.hidden{opacity:0;pointer-events:none}
+  h1{font-weight:300;letter-spacing:.18em;text-transform:uppercase;font-size:clamp(18px,3.2vw,34px);margin:0 0 6px}
+  h1 b{font-weight:600}
+  .sub{opacity:.7;font-size:clamp(12px,1.6vw,15px);letter-spacing:.08em;margin-bottom:34px}
+  .bar{width:min(420px,80vw);height:2px;background:rgba(255,255,255,.12);border-radius:2px;overflow:hidden;margin-bottom:10px}
+  .bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,#f0b46a,#f7e2b3);transition:width .4s ease}
+  .status{font-size:13px;opacity:.65;min-height:18px;letter-spacing:.04em}
+  #enter{margin-top:26px;display:none;gap:12px;flex-wrap:wrap;justify-content:center}
+  .btn{border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.06);color:#f3ede2;padding:12px 22px;border-radius:999px;
+    font-size:14px;letter-spacing:.12em;text-transform:uppercase;cursor:pointer;backdrop-filter:blur(6px)}
+  .btn.primary{background:#f0b46a;color:#1a1408;border-color:#f0b46a;font-weight:600}
+  .hint{margin-top:22px;font-size:12px;opacity:.55;line-height:1.7;max-width:560px}
+  #hud{position:fixed;left:16px;bottom:14px;z-index:5;font-size:12px;letter-spacing:.06em;opacity:.75;pointer-events:none;
+    text-shadow:0 1px 4px rgba(0,0,0,.6);max-width:60vw}
+  #hud b{font-weight:600;color:#f7d9a6}
+  #hud small{display:block;opacity:.7;margin-top:3px}
+  #modes{position:fixed;right:14px;bottom:14px;z-index:5;display:flex;gap:6px}
+  #modes button{border:1px solid rgba(255,255,255,.3);background:rgba(10,12,18,.55);color:#f3ede2;padding:8px 12px;border-radius:999px;font-size:12px;
+    letter-spacing:.08em;cursor:pointer;backdrop-filter:blur(6px)}
+  #modes button.on{background:#f0b46a;color:#1a1408;border-color:#f0b46a}
+  #VRButton{bottom:auto !important;top:14px !important;right:14px !important;left:auto !important;transform:none !important;
+    border-radius:999px !important;padding:10px 18px !important;font-family:inherit !important;letter-spacing:.1em !important}
+</style>
+</head>
+<body>
+<div id="overlay">
+  <h1>Valle de <b>Cerezo de Abajo</b></h1>
+  <div class="sub">Nube de puntos LIDAR PNOA 2025 · Sierra de Ayllón, Segovia</div>
+  <div class="bar"><i id="barfill"></i></div>
+  <div class="status" id="status">Preparando el terreno…</div>
+  <div id="enter"><button class="btn primary" id="btnStart">Explorar</button></div>
+  <div class="hint" id="hint"></div>
+</div>
+<div id="hud"></div>
+<div id="modes">
+  <button data-mode="maqueta">Maqueta</button>
+  <button data-mode="gigante">Gigante</button>
+  <button data-mode="vuelo">Vuelo</button>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { VRButton } from 'three/addons/webxr/VRButton.js';
+import { Sky } from 'three/addons/objects/Sky.js';
+
+const isQuest = /OculusBrowser|Quest/i.test(navigator.userAgent);
+const isMobile = isQuest || /Android|iPhone|iPad/i.test(navigator.userAgent);
+const $ = id => document.getElementById(id);
+const setStatus = (t, p) => { $('status').textContent = t; if (p != null) $('barfill').style.width = (p * 100) + '%'; };
+const FOCUS = { x: -120, z: -1670 };   // Cerezo de Abajo en coordenadas locales (x=E, z=S, origen en el centro)
+
+// ---------- render ----------
+const renderer = new THREE.WebGLRenderer({ antialias: !isMobile, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, isMobile ? 1.5 : 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.9;
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType('local-floor');
+if (renderer.xr.setFoveation) renderer.xr.setFoveation(1);
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.05, 80000);
+const player = new THREE.Group(); player.add(camera); scene.add(player);
+
+// cielo de última hora de la tarde
+const sky = new Sky(); sky.scale.setScalar(450000); scene.add(sky);
+const sun = new THREE.Vector3();
+{
+  const u = sky.material.uniforms;
+  u.turbidity.value = 5; u.rayleigh.value = 2.4; u.mieCoefficient.value = 0.006; u.mieDirectionalG.value = 0.82;
+  sun.setFromSphericalCoords(1, THREE.MathUtils.degToRad(90 - 12), THREE.MathUtils.degToRad(250));
+  u.sunPosition.value.copy(sun);
+}
+const sunLight = new THREE.DirectionalLight(0xffd6a0, 1.9); sunLight.position.copy(sun).multiplyScalar(10000); scene.add(sunLight);
+scene.add(new THREE.HemisphereLight(0xbdd2ff, 0x5c4c36, 0.85));
+const FOG_COLOR = new THREE.Color(0xe9d3b3);
+
+// ---------- terreno (malla desde el MDT LIDAR) ----------
+const terrain = new THREE.Group(); scene.add(terrain);
+let meta, hf, HW, HH, mesh, material, skirt, points = [];
+const loadImage = url => new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = url; });
+function sampleH(px, py) {
+  const c = meta.cell_m; let x = px / c, y = py / c;
+  x = Math.min(Math.max(x, 0), HW - 1.001); y = Math.min(Math.max(y, 0), HH - 1.001);
+  const x0 = x | 0, y0 = y | 0, fx = x - x0, fy = y - y0, i = y0 * HW + x0;
+  return (hf[i] * (1 - fx) + hf[i + 1] * fx) * (1 - fy) + (hf[i + HW] * (1 - fx) + hf[i + HW + 1] * fx) * fy;
+}
+function terrainHeightAtWorld(wx, wz) {
+  const [W, H] = meta.extent_m;
+  const lx = (wx - terrain.position.x) / terrain.scale.x + W / 2, lz = (wz - terrain.position.z) / terrain.scale.z + H / 2;
+  return sampleH(lx, lz) * terrain.scale.y + terrain.position.y;
+}
+async function buildTerrain() {
+  setStatus('Leyendo el modelo digital del terreno…', 0.04);
+  meta = await (await fetch('heightmap.json')).json();
+  const im = await loadImage('heightmap.png'); HW = im.width; HH = im.height;
+  const cv = document.createElement('canvas'); cv.width = HW; cv.height = HH;
+  const cx = cv.getContext('2d', { willReadFrequently: true }); cx.drawImage(im, 0, 0);
+  const d = cx.getImageData(0, 0, HW, HH).data; hf = new Float32Array(HW * HH);
+  const range = meta.zmax - meta.zmin;
+  for (let i = 0, j = 0; i < hf.length; i++, j += 4) hf[i] = ((d[j] << 8) | d[j + 1]) / 65535 * range;
+  setStatus('Esculpiendo el relieve…', 0.12); await new Promise(r => setTimeout(r, 20));
+  const [W, H] = meta.extent_m;
+  const segX = isMobile ? 420 : 800, segY = Math.round(segX * H / W);
+  const geo = new THREE.PlaneGeometry(W, H, segX, segY); geo.rotateX(-Math.PI / 2);
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) pos.setY(i, sampleH(pos.getX(i) + W / 2, pos.getZ(i) + H / 2));
+  geo.computeVertexNormals();
+  material = new THREE.MeshLambertMaterial({ color: 0x8a8f78 });
+  mesh = new THREE.Mesh(geo, material); terrain.add(mesh);
+  skirt = new THREE.Mesh(new THREE.CircleGeometry(80000, 96), new THREE.MeshLambertMaterial({ color: 0x8a7d62 }));
+  skirt.rotation.x = -Math.PI / 2; skirt.position.y = -3; terrain.add(skirt);
+  setStatus('Relieve listo. Cargando la ortoimagen del propio LIDAR…', 0.2);
+}
+function applyTexture(tex) {
+  tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  material.map = tex; material.color.set(0xffffff); material.needsUpdate = true;
+}
+const texLoader = new THREE.TextureLoader();
+const loadTex = url => new Promise((res, rej) => texLoader.load(url, res, undefined, rej));
+
+// ---------- nube de puntos (vegetación y edificios, color real del LIDAR) ----------
+const pointsMat = new THREE.ShaderMaterial({
+  uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {
+    uScale: { value: 1 }, uPx: { value: 800 }, uFocus: { value: new THREE.Vector2(FOCUS.x, FOCUS.z) }, uBoost: { value: 1 }
+  }]),
+  vertexShader: `
+    // 'position' = (qx, qy, qz) enteros de 16 bits; 'color' la declara three (vertexColors)
+    attribute float cls;
+    uniform float uScale, uPx, uBoost; uniform vec2 uFocus;
+    varying vec3 vColor; varying float vShade;
+    #include <fog_pars_vertex>
+    void main(){
+      vec3 p = vec3(position.x*0.1 - 2500.0, position.z*0.01, 3000.0 - position.y*0.1);
+      vec4 mv = modelViewMatrix * vec4(p,1.0);
+      gl_Position = projectionMatrix * mv;
+      float near = 1.0 - smoothstep(1250.0, 1400.0, distance(p.xz, uFocus));
+      float w = mix(3.4, 1.25, near) * (cls > 5.5 ? 1.5 : 1.0) * uBoost;   // tamaño en metros del terreno
+      gl_PointSize = clamp(w * uScale * uPx / max(-mv.z, 0.02), 1.0, 48.0);
+      vColor = color; vShade = 0.85 + 0.15 * clamp(position.z*0.01/300.0, 0.0, 1.0);
+      #include <fog_vertex>
+    }`,
+  fragmentShader: `
+    varying vec3 vColor; varying float vShade;
+    #include <fog_pars_fragment>
+    void main(){
+      vec2 d = gl_PointCoord - 0.5; float r2 = dot(d,d); if (r2 > 0.25) discard;
+      vec3 c = pow(vColor, vec3(2.2));
+      float g = dot(c, vec3(0.299,0.587,0.114)); c = mix(vec3(g), c, 1.25);   // un poco más de color
+      c *= (1.0 - 0.35*r2*4.0) * vShade;
+      gl_FragColor = vec4(c, 1.0);
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
+      #include <fog_fragment>
+    }`,
+  fog: true, vertexColors: true
+});
+
+async function loadPoints() {
+  const pm = await (await fetch('points.json')).json();
+  const chunks = isMobile ? pm.chunks.slice(0, 1) : pm.chunks;
+  let total = chunks.reduce((s, c) => s + c.n, 0), got = 0;
+  for (const ch of chunks) {
+    const res = await fetch(ch.file); const reader = res.body.getReader();
+    const buf = new Uint8Array(ch.n * 10); let off = 0;
+    while (true) { const { done, value } = await reader.read(); if (done) break; buf.set(value.subarray(0, buf.length - off), off); off += value.length;
+      setStatus(`Cargando nube de puntos LIDAR… ${((got + off / 10) / 1e6).toFixed(1)} M de ${(total / 1e6).toFixed(1)} M puntos`, 0.4 + 0.58 * (got + off / 10) / total); }
+    const n = ch.n;
+    const xyz = new Uint16Array(buf.buffer, 0, n * 3), rgb = new Uint8Array(buf.buffer, n * 6, n * 3), cls = new Uint8Array(buf.buffer, n * 9, n);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(xyz, 3, false));
+    g.setAttribute('color', new THREE.BufferAttribute(rgb, 3, true));
+    g.setAttribute('cls', new THREE.BufferAttribute(cls, 1, false));
+    g.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 150, 0), 4200);
+    const p = new THREE.Points(g, pointsMat); p.frustumCulled = false; terrain.add(p); points.push(p);
+    got += n;
+  }
+}
+
+// ---------- modos ----------
+const MODES = {
+  maqueta: { label: 'Maqueta', scale: 2.6 / 5000, ex: 1.55, fog: 0, hint: 'El valle a escala 1:1900. Rodéalo, agáchate, mira los árboles y las casas.' },
+  gigante: { label: 'Gigante', scale: 1 / 60, ex: 1.3, fog: 0.0035, hint: 'Camina por el valle como un gigante: los cerros llegan a la cintura.' },
+  vuelo:   { label: 'Vuelo',   scale: 1, ex: 1, fog: 0.00010, hint: 'Escala real. Vuela sobre el valle a la altura de un buitre.' },
+};
+let mode = 'maqueta', controls;
+const centerHeight = () => { const [W, H] = meta.extent_m; return sampleH(W / 2, H / 2); };
+function setMode(m, fromVR) {
+  mode = m; const M = MODES[m];
+  terrain.scale.set(M.scale, M.scale * M.ex, M.scale);
+  pointsMat.uniforms.uScale.value = M.scale;
+  scene.fog = M.fog ? new THREE.FogExp2(FOG_COLOR, M.fog) : null;
+  skirt.visible = m !== 'maqueta';
+  document.querySelectorAll('#modes button').forEach(b => b.classList.toggle('on', b.dataset.mode === m));
+  const inVR = renderer.xr.isPresenting, hC = centerHeight();
+  player.position.set(0, 0, 0); player.rotation.set(0, 0, 0);
+  if (m === 'maqueta') {
+    terrain.position.set(0, 0.6 - hC * M.scale * M.ex * 0.4, inVR ? -1.8 : 0);
+    if (!inVR) { camera.position.set(2.3, 1.7, 2.7); controls.target.set(0, 0.55, 0); controls.autoRotate = true; controls.minDistance = 0.3; controls.maxDistance = 14; }
+  } else if (m === 'gigante') {
+    terrain.position.set(0, -hC * M.scale * M.ex, 0);
+    if (!inVR) { camera.position.set(28, 14, 44); controls.target.set(0, 2, 0); controls.autoRotate = false; controls.minDistance = 0.2; controls.maxDistance = 400; }
+  } else {
+    terrain.position.set(0, 0, 0);
+    player.position.set(FOCUS.x, hC + 260, FOCUS.z + 900);
+    if (!inVR) { camera.position.set(FOCUS.x + 1200, hC + 1100, FOCUS.z + 3000); controls.target.set(FOCUS.x, hC + 80, FOCUS.z); controls.autoRotate = true; controls.minDistance = 40; controls.maxDistance = 15000; }
+  }
+  $('hud').innerHTML = `<b>${M.label}</b> · ${M.hint}<small>${isQuest ? 'Stick izq: moverte · Stick der: girar / subir · A o gatillo: cambiar de modo' : 'Arrastra para girar · rueda para acercarte · teclas 1 · 2 · 3'}</small>`;
+  if (fromVR) showVRLabel(M.label);
+}
+document.querySelectorAll('#modes button').forEach(b => b.onclick = () => setMode(b.dataset.mode));
+addEventListener('keydown', e => { if (e.key === '1') setMode('maqueta'); if (e.key === '2') setMode('gigante'); if (e.key === '3') setMode('vuelo'); });
+
+let vrLabel, vrLabelUntil = 0;
+function showVRLabel(text) {
+  if (!vrLabel) {
+    const cv = document.createElement('canvas'); cv.width = 512; cv.height = 128;
+    vrLabel = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), transparent: true, depthTest: false }));
+    vrLabel.scale.set(0.5, 0.125, 1); vrLabel.userData.cv = cv; camera.add(vrLabel); vrLabel.position.set(0, -0.2, -0.9);
+  }
+  const cv = vrLabel.userData.cv, c = cv.getContext('2d');
+  c.clearRect(0, 0, 512, 128); c.fillStyle = 'rgba(10,12,18,.65)'; c.beginPath(); c.roundRect(8, 24, 496, 80, 40); c.fill();
+  c.fillStyle = '#f7d9a6'; c.font = '600 44px sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(text, 256, 64);
+  vrLabel.material.map.needsUpdate = true; vrLabel.visible = true; vrLabelUntil = performance.now() + 2200;
+}
+
+// ---------- mandos VR ----------
+const modeOrder = ['maqueta', 'gigante', 'vuelo'], prevBtn = new Map();
+const headDir = new THREE.Vector3(), rightV = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0), camW = new THREE.Vector3();
+let snapCooldown = 0;
+function handleXRInput(dt) {
+  const session = renderer.xr.getSession(); if (!session) return;
+  camera.getWorldDirection(headDir);
+  const speed = mode === 'vuelo' ? 90 : mode === 'gigante' ? 3.5 : 0.8;
+  for (const src of session.inputSources) {
+    const gp = src.gamepad; if (!gp) continue;
+    const ax = gp.axes.length >= 4 ? [gp.axes[2], gp.axes[3]] : [gp.axes[0] || 0, gp.axes[1] || 0];
+    const dz = v => Math.abs(v) < 0.15 ? 0 : v, sx = dz(ax[0]), sy = dz(ax[1]);
+    if (src.handedness === 'left') {
+      const fwd = headDir.clone(); if (mode !== 'vuelo') fwd.y = 0; fwd.normalize();
+      rightV.crossVectors(fwd, up).normalize();
+      player.position.addScaledVector(fwd, -sy * speed * dt); player.position.addScaledVector(rightV, sx * speed * dt);
+    } else {
+      snapCooldown -= dt;
+      if (Math.abs(sx) > 0.6 && snapCooldown <= 0) { player.rotation.y -= Math.sign(sx) * Math.PI / 6; snapCooldown = 0.35; }
+      if (Math.abs(sx) < 0.3) snapCooldown = 0;
+      if (mode !== 'gigante') player.position.y += -sy * speed * 0.6 * dt;
+    }
+    for (const bi of [4, 0]) {
+      const b = gp.buttons[bi]; if (!b) continue;
+      const key = src.handedness + bi, was = prevBtn.get(key) || false;
+      if (b.pressed && !was) setMode(modeOrder[(modeOrder.indexOf(mode) + 1) % 3], true);
+      prevBtn.set(key, b.pressed);
+    }
+  }
+  camera.getWorldPosition(camW);
+  if (mode === 'gigante') { const t = terrainHeightAtWorld(camW.x, camW.z); player.position.y += (t - player.position.y) * Math.min(1, dt * 6); }
+  if (mode === 'vuelo') { const f = terrainHeightAtWorld(camW.x, camW.z) + 25; if (player.position.y < f) player.position.y = f; }
+}
+
+// ---------- arranque ----------
+async function main() {
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true; controls.dampingFactor = 0.06; controls.autoRotateSpeed = 0.3;
+  try {
+    await buildTerrain();
+    applyTexture(await loadTex('ortho_2m.jpg'));
+    setMode('maqueta');
+    renderer.setAnimationLoop(loop);
+    $('enter').style.display = 'flex';
+    $('hint').innerHTML = isQuest
+      ? 'Pulsa <b>Explorar</b> y después <b>ENTER VR</b> (arriba a la derecha).<br>Stick izquierdo: moverte · Stick derecho: girar / subir · Botón A o gatillo: cambiar de modo (Maqueta → Gigante → Vuelo)'
+      : 'En el ordenador: arrastra para girar, rueda para acercarte, teclas 1 · 2 · 3 para cambiar de modo.<br>Con las Meta Quest: abre esta misma dirección en el navegador de las gafas y pulsa ENTER VR.';
+    $('btnStart').onclick = () => { $('overlay').classList.add('hidden'); document.body.appendChild(VRButton.createButton(renderer)); };
+    (async () => {
+      if (!isMobile) loadTex('ortho_1m.jpg').then(applyTexture).catch(() => {});
+      try { await loadPoints(); } catch (e) { console.warn('points', e); }
+      setStatus('Todo listo.', 1);
+    })();
+  } catch (e) { setStatus('No se ha podido cargar el terreno: ' + e.message, 0); console.error(e); }
+}
+renderer.xr.addEventListener('sessionstart', () => setMode(mode, true));
+renderer.xr.addEventListener('sessionend', () => setMode(mode));
+
+const clock = new THREE.Clock(), dbs = new THREE.Vector2();
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  if (renderer.xr.isPresenting) handleXRInput(dt); else controls.update();
+  renderer.getDrawingBufferSize(dbs);
+  const cam = renderer.xr.isPresenting ? renderer.xr.getCamera() : camera;
+  pointsMat.uniforms.uPx.value = cam.projectionMatrix.elements[5] * dbs.y * 0.5;
+  if (vrLabel && vrLabel.visible && performance.now() > vrLabelUntil) vrLabel.visible = false;
+  renderer.render(scene, camera);
+}
+addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+main();
+</script>
+</body>
+</html>
