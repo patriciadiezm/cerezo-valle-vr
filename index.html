@@ -89,13 +89,14 @@ const sky = new Sky(); sky.scale.setScalar(450000); scene.add(sky);
 const sun = new THREE.Vector3();
 {
   const u = sky.material.uniforms;
-  u.turbidity.value = 5; u.rayleigh.value = 2.4; u.mieCoefficient.value = 0.006; u.mieDirectionalG.value = 0.82;
-  sun.setFromSphericalCoords(1, THREE.MathUtils.degToRad(90 - 12), THREE.MathUtils.degToRad(250));
+  u.turbidity.value = 7; u.rayleigh.value = 2.8; u.mieCoefficient.value = 0.007; u.mieDirectionalG.value = 0.85;
+  sun.setFromSphericalCoords(1, THREE.MathUtils.degToRad(90 - 8), THREE.MathUtils.degToRad(250));
   u.sunPosition.value.copy(sun);
 }
 const sunLight = new THREE.DirectionalLight(0xffd6a0, 1.9); sunLight.position.copy(sun).multiplyScalar(10000); scene.add(sunLight);
 scene.add(new THREE.HemisphereLight(0xbdd2ff, 0x5c4c36, 0.85));
-const FOG_COLOR = new THREE.Color(0xe9d3b3);
+const FOG_COLOR = new THREE.Color(0xe6dccd);
+const DARK_BG = new THREE.Color(0x0e1219);
 
 // ---------- terreno (malla desde el MDT LIDAR) ----------
 const terrain = new THREE.Group(); scene.add(terrain);
@@ -130,7 +131,7 @@ async function buildTerrain() {
   geo.computeVertexNormals();
   material = new THREE.MeshLambertMaterial({ color: 0x8a8f78 });
   mesh = new THREE.Mesh(geo, material); terrain.add(mesh);
-  skirt = new THREE.Mesh(new THREE.CircleGeometry(80000, 96), new THREE.MeshLambertMaterial({ color: 0x8a7d62 }));
+  skirt = new THREE.Mesh(new THREE.CircleGeometry(30000, 96), new THREE.MeshLambertMaterial({ color: 0x7d7157 }));
   skirt.rotation.x = -Math.PI / 2; skirt.position.y = -3; terrain.add(skirt);
   setStatus('Relieve listo. Cargando la ortoimagen del propio LIDAR…', 0.2);
 }
@@ -212,13 +213,13 @@ function setMode(m, fromVR) {
   terrain.scale.set(M.scale, M.scale * M.ex, M.scale);
   pointsMat.uniforms.uScale.value = M.scale;
   scene.fog = M.fog ? new THREE.FogExp2(FOG_COLOR, M.fog) : null;
-  skirt.visible = m !== 'maqueta';
+  skirt.visible = m !== 'maqueta'; sky.visible = m !== 'maqueta'; scene.background = m === 'maqueta' ? DARK_BG : null;
   document.querySelectorAll('#modes button').forEach(b => b.classList.toggle('on', b.dataset.mode === m));
   const inVR = renderer.xr.isPresenting, hC = centerHeight();
   player.position.set(0, 0, 0); player.rotation.set(0, 0, 0);
   if (m === 'maqueta') {
     terrain.position.set(0, 0.6 - hC * M.scale * M.ex * 0.4, inVR ? -1.8 : 0);
-    if (!inVR) { camera.position.set(2.3, 1.7, 2.7); controls.target.set(0, 0.55, 0); controls.autoRotate = true; controls.minDistance = 0.3; controls.maxDistance = 14; }
+    if (!inVR) { camera.position.set(1.7, 1.25, 2.1); controls.target.set(0, 0.5, 0); controls.autoRotate = true; controls.minDistance = 0.3; controls.maxDistance = 14; }
   } else if (m === 'gigante') {
     terrain.position.set(0, -hC * M.scale * M.ex, 0);
     if (!inVR) { camera.position.set(28, 14, 44); controls.target.set(0, 2, 0); controls.autoRotate = false; controls.minDistance = 0.2; controls.maxDistance = 400; }
